@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Vercel build outputs (but keep project.json)
+.vercel/*
+!.vercel/project.json
+frontend/.vercel/*
+!frontend/.vercel/project.json
+backend/.vercel/*
+!backend/.vercel/project.json
+
+# Testing
+coverage/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+*.cover
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Sensitive documentation (secrets, credentials, IDs)
+*SECRETS*.txt
+*CREDENTIALS*.txt
+*KEYS*.txt
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+.cache/
+.temp/
+

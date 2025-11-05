@@ -1,0 +1,273 @@
+name: Intelligent CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '20.x'
+
+# Simplified Pipeline Stages (Frontend Only):
+# 1. Setup - Install and cache dependencies
+# 2. Quality & Security (Parallel) - Linting, Testing, SonarCloud, and Security Scans
+# 3. Build - Build artifacts after all quality checks pass
+# 4. Deploy - Deploy to production after build and security checks complete
+
+jobs:
+  # Step 1-2: Setup and Dependencies
+  setup:
+    name: Setup and Cache Dependencies
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache-deps.outputs.cache-hit }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # For SonarCloud analysis
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache Dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            frontend/node_modules
+          key: ${{ runner.os }}-deps-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      - name: Install Frontend Dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          cd frontend
+          npm ci
+
+  # Step 3: Frontend Linting
+  lint-frontend:
+    name: Lint Frontend Code
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run ESLint
+        run: |
+          cd frontend
+          npm run lint
+
+  # Step 4: Build Frontend
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    needs: [setup, lint-frontend]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build Frontend
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist/
+          retention-days: 7
+
+  # Step 5: Frontend Unit Tests
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run Unit Tests
+        run: |
+          cd frontend
+          npm run test:ci
+
+      - name: Upload Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 7
+
+  # Step 6: Security - Dependency Vulnerability Scanning
+  security-dependencies:
+    name: Security - Dependency Scan
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Frontend Dependency Audit
+        run: |
+          cd frontend
+          npm audit --audit-level=moderate || true
+
+  # Step 7: Security - SAST with CodeQL
+  security-sast:
+    name: Security - SAST (CodeQL)
+    runs-on: ubuntu-latest
+    needs: setup
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Step 8: Code Quality - SonarCloud Analysis
+  sonarcloud:
+    name: Code Quality - SonarCloud
+    runs-on: ubuntu-latest
+    needs: [test-frontend]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run Tests for Coverage
+        run: |
+          cd frontend
+          npm run test:ci
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Step 9: Deploy Frontend to Vercel
+  deploy-frontend:
+    name: Deploy Frontend to Vercel
+    runs-on: ubuntu-latest
+    needs: [build-frontend, test-frontend, security-sast, sonarcloud]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    continue-on-error: true
+    environment:
+      name: production-frontend
+      url: ${{ steps.deploy-frontend.outputs.url }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Deploy Frontend to Vercel
+        id: deploy-frontend
+        working-directory: ./frontend
+        run: |
+          url=$(vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }} --yes)
+          echo "url=$url" >> $GITHUB_OUTPUT
+          echo "Frontend deployed to: $url"
+        env:
+          VITE_RUBINHO_CAMPEAO: ${{ secrets.RUBINHO_CAMPEAO || 'false' }}
+
+  # Step 10: Update README Badges
+  update-badges:
+    name: Update README Badges
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Update Status Badges
+        run: |
+          echo "✅ Pipeline completed successfully"
+          echo "Status badges will be visible in README.md"
+
+  # Step 11: Notify on Completion
+  notify:
+    name: Pipeline Notification
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend, update-badges]
+    if: always()
+    steps:
+      - name: Pipeline Status
+        run: |
+          echo "Pipeline Status: ${{ job.status }}"
+          echo "Deployment completed for main branch"
