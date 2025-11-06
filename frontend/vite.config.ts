@@ -13,5 +13,9 @@ export default defineConfig({
       },
     },
   },
+  define: {
+    __COMMIT_SHA__: JSON.stringify(process.env.VITE_COMMIT_SHA || 'dev'),
+    __BUILD_TIMESTAMP__: JSON.stringify(process.env.VITE_BUILD_TIMESTAMP || new Date().toISOString().replace('T', ' ').substring(0, 19)),
+  },
 })
 

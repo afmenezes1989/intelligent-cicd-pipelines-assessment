@@ -45,6 +45,9 @@ function App() {
               <h1 className="text-3xl font-bold text-white uppercase tracking-wider">
                 2025 Standings
               </h1>
+              <p className="text-xs text-gray-500 mt-1">
+                updated: {__BUILD_TIMESTAMP__} · version: {__COMMIT_SHA__}
+              </p>
             </div>
           </div>
         </div>
